@@ -1,139 +1,154 @@
--- ✅ ПРОСТОЙ АВТОСБОР ДЛЯ GROW A GARDEN ПОД DELTA
--- ВСТАВЬ ЭТО ЦЕЛИКОМ В DELTA EXECUTOR И НАЖМИ EXECUTE
+-- 🔥 УПРОЩЁННЫЙ АВТОФАРМ ДЛЯ GROW A GARDEN (НА ОСНОВЕ DEPTHSO)
+-- ВСТАВЛЯЙ ЦЕЛИКОМ В DELTA, НИКАКИХ LOADSTRING НЕ НУЖНО
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+
 local player = Players.LocalPlayer
-
 local character = player.Character or player.CharacterAdded:Wait()
-local rootPart = character:WaitForChild("HumanoidRootPart")
+local hrp = character:WaitForChild("HumanoidRootPart")
 
--- НАСТРОЙКИ
-local FARM_ENABLED = true      -- автосбор вкл/выкл
-local WALK_SPEED = 50          -- скорость ходьбы
-local TELEPORT_DELAY = 0.1     -- задержка между тп
-local SCAN_DELAY = 0.3         -- задержка, если нет фруктов
+-- === НАСТРОЙКИ ===
+local AUTO_PLANT = true      -- авто-посадка семян
+local AUTO_HARVEST = true    -- авто-сбор растений
+local AUTO_SELL = true       -- авто-продажа инвентаря
+local PLANT_SEED_NAME = "Basic Seed"  -- имя семени (можно поменять)
+local SELL_INTERVAL = 5      -- как часто продавать (секунд)
 
--- Под себя потом можешь поменять слова, если узнаем точные имена
-local FRUIT_KEYWORDS = {
-    "fruit",
-    "apple",
-    "banana",
-    "berry",
-    "melon",
-    "straw",
-    "grape"
-}
+-- === РЕМОУТЫ, КАК В ПУБЛИЧНОМ СКРИПТЕ DEPTHSO === [web:52]
+local GameEvents = ReplicatedStorage:WaitForChild("GameEvents")
+local Plant_RE = GameEvents:WaitForChild("Plant_RE")              -- посадка
+local Sell_Inventory = GameEvents:WaitForChild("Sell_Inventory")  -- продажа
+local BuySeedStock = GameEvents:FindFirstChild("BuySeedStock")    -- покупка (на будущее)
+
+-- Папки с фермой и растениями (по структуре depthso) [web:52]
+local FarmFolder = workspace:WaitForChild("Farm")
+local PlotsFolder = FarmFolder:WaitForChild("Plots")
+local CropsFolder = FarmFolder:WaitForChild("Crops")
 
 ---------------------------------------------------------------------
 -- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 ---------------------------------------------------------------------
 
-local function isFruit(obj)
-    if not obj:IsA("BasePart") then return false end
-    local name = obj.Name:lower()
-    for _, word in ipairs(FRUIT_KEYWORDS) do
-        if name:find(word) then
-            return true
+-- Получить список всех грядок
+local function getAllPlots()
+    local plots = {}
+    for _, plot in ipairs(PlotsFolder:GetChildren()) do
+        if plot:IsA("BasePart") or plot:IsA("Model") then
+            table.insert(plots, plot)
         end
+    end
+    return plots
+end
+
+-- Проверка, свободна ли грядка (нет растения сверху)
+local function isPlotFree(plot)
+    if not plot or not plot.Parent then return false end
+    -- depthso смотрит по Crops – мы просто проверим, нет ли растения с таким же ID [web:52]
+    for _, crop in ipairs(CropsFolder:GetChildren()) do
+        if crop:GetAttribute("PlotID") and plot:GetAttribute("PlotID") then
+            if crop:GetAttribute("PlotID") == plot:GetAttribute("PlotID") then
+                return false
+            end
+        end
+    end
+    return true
+end
+
+-- Посадить семя на грядку
+local function plantOnPlot(plot)
+    if not plot or not plot.Parent then return end
+    -- В depthso Plant_RE принимает (plot, seedName) [web:52]
+    Plant_RE:FireServer(plot, PLANT_SEED_NAME)
+end
+
+-- Проверка, созрело ли растение
+local function isMature(crop)
+    if not crop or not crop.Parent then return false end
+    -- depthso использует атрибуты типа "GrowthStage" [web:52]
+    local stage = crop:GetAttribute("GrowthStage")
+    if stage and stage == "Mature" then
+        return true
     end
     return false
 end
 
-local function getAllFruits()
-    local fruits = {}
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if isFruit(obj) then
-            table.insert(fruits, obj)
-        end
+-- Собрать растение
+local function harvestCrop(crop)
+    if not crop or not crop.Parent then return end
+    -- В паблик-скрипте сбор идёт через ProximityPrompt / событие [web:52]
+    local prompt = crop:FindFirstChildWhichIsA("ProximityPrompt", true)
+    if prompt and fireproximityprompt then
+        pcall(function()
+            fireproximityprompt(prompt)
+        end)
     end
-    return fruits
 end
 
-local function getClosestFruit()
-    if not rootPart then return nil end
-
-    local fruits = getAllFruits()
-    local closest, closestDist
-
-    for _, fruit in ipairs(fruits) do
-        local dist = (fruit.Position - rootPart.Position).Magnitude
-        if not closestDist or dist < closestDist then
-            closestDist = dist
-            closest = fruit
-        end
-    end
-
-    return closest
-end
-
-local function teleportTo(part)
-    if not part or not part.Parent then return end
-    if not rootPart then return end
-
-    rootPart.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0))
+-- Продать инвентарь
+local function sellInventory()
+    Sell_Inventory:FireServer()
 end
 
 ---------------------------------------------------------------------
--- ОСНОВНОЙ ЦИКЛ
+-- ЦИКЛ АВТО-ПОСАДКИ
 ---------------------------------------------------------------------
 
 task.spawn(function()
-    print("[GA Garden] Автофарм запущен, братан!")
-
     while true do
-        if FARM_ENABLED and rootPart then
-            local fruit = getClosestFruit()
-            if fruit then
-                teleportTo(fruit)
-                -- Многие игры собирают по Touch, просто стоять на предмете уже достаточно
-                -- Если тут нужен именно клик/промпт — подправим потом, когда узнаем структуру
-                task.wait(TELEPORT_DELAY)
-            else
-                task.wait(SCAN_DELAY)
+        if AUTO_PLANT then
+            local plots = getAllPlots()
+            for _, plot in ipairs(plots) do
+                if isPlotFree(plot) then
+                    plantOnPlot(plot)
+                    task.wait(0.05)
+                end
             end
-        else
-            task.wait(0.5)
         end
+        task.wait(0.3)
     end
 end)
 
 ---------------------------------------------------------------------
--- РЕСПАВН
+-- ЦИКЛ АВТО-СБОРА
 ---------------------------------------------------------------------
 
-local function onCharacterAdded(char)
+task.spawn(function()
+    while true do
+        if AUTO_HARVEST then
+            for _, crop in ipairs(CropsFolder:GetChildren()) do
+                if isMature(crop) then
+                    harvestCrop(crop)
+                    task.wait(0.05)
+                end
+            end
+        end
+        task.wait(0.2)
+    end
+end)
+
+---------------------------------------------------------------------
+-- ЦИКЛ АВТО-ПРОДАЖИ
+---------------------------------------------------------------------
+
+task.spawn(function()
+    while true do
+        if AUTO_SELL then
+            sellInventory()
+        end
+        task.wait(SELL_INTERVAL)
+    end
+end)
+
+---------------------------------------------------------------------
+-- РЕСПАВН ПЕРСОНАЖА
+---------------------------------------------------------------------
+
+player.CharacterAdded:Connect(function(char)
     character = char
-    local hrp = char:WaitForChild("HumanoidRootPart", 10)
-    local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 10)
-
-    if hrp then
-        rootPart = hrp
-    end
-
-    if hum then
-        hum.WalkSpeed = WALK_SPEED
-    end
-
-    print("[GA Garden] Персонаж перезагружен, автофарм продолжается.")
-end
-
-player.CharacterAdded:Connect(onCharacterAdded)
-
----------------------------------------------------------------------
--- КОМАНДЫ ЧЕРЕЗ ЧАТ
----------------------------------------------------------------------
-
-player.Chatted:Connect(function(msg)
-    msg = msg:lower()
-    if msg == "/farm on" then
-        FARM_ENABLED = true
-        print("[GA Garden] Автосбор ВКЛЮЧЕН.")
-    elseif msg == "/farm off" then
-        FARM_ENABLED = false
-        print("[GA Garden] Автосбор ВЫКЛЮЧЕН.")
-    end
+    hrp = char:WaitForChild("HumanoidRootPart")
 end)
 
-print("[GA Garden] Команды: /farm on и /farm off")
-                           
+print("[GAG] Упрощённый автоферм включен: авто-посадка, авто-сбор, авто-продажа.")
+print("[GAG] Если что-то не работает (нет папок/атрибутов) — скажи, будем подгонять дальше.")
