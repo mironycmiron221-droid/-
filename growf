@@ -1,0 +1,79 @@
+-- Автосбор фруктов для Grow a Garden [web:3]
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local player = Players.LocalPlayer
+
+local collecting = true  -- Включи/выключи автосбор
+local autoSell = true   -- Авто-продажа при полном инвентаре
+local speed = 50        -- Скорость движения
+
+-- Функция для сбора фрукта
+local function collectFruit(fruit)
+    if fruit and fruit.Parent then
+        local char = player.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            -- Телепорт к фрукту
+            char.HumanoidRootPart.CFrame = fruit.CFrame * CFrame.new(0, 5, 0)
+            wait(0.1)
+            -- Кликер или firetouch (адаптируй под игру)
+            fireclickdetector(fruit:FindFirstChildOfClass("ClickDetector"))
+            print("Собрал фрукт: " .. fruit.Name)
+        end
+    end
+end
+
+-- Поиск всех фруктов в workspace
+local function findFruits()
+    local fruits = {}
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj.Name:lower():find("fruit") or obj.Name:lower():find("apple") or obj.Name:lower():find("berry") or obj.Name:lower():find("harvest") then  -- Адаптируй имена под игру [web:7]
+            table.insert(fruits, obj)
+        end
+    end
+    return fruits
+end
+
+-- Основной цикл автосбора
+local connection
+connection = RunService.Heartbeat:Connect(function()
+    if collecting then
+        local fruits = findFruits()
+        if #fruits > 0 then
+            for _, fruit in pairs(fruits) do
+                collectFruit(fruit)
+            end
+        end
+        
+        -- Авто-продажа (ищи магазин по имени, адаптируй)
+        if autoSell then
+            local sellPart = workspace:FindFirstChild("SellShop") or workspace:FindFirstChild("Shop")  -- Имя магазина из игры [web:2]
+            if sellPart and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+                player.Character.HumanoidRootPart.CFrame = sellPart.CFrame
+                fireclickdetector(sellPart:FindFirstChildOfClass("ClickDetector"))
+            end
+        end
+    end
+end)
+
+-- Обработка респавна персонажа
+local function onCharacterAdded(char)
+    wait(1)  -- Ждем загрузки
+    local humanoid = char:WaitForChild("Humanoid")
+    humanoid.WalkSpeed = speed  -- Ускоряем для фарма
+end
+
+player.CharacterAdded:Connect(onCharacterAdded)
+if player.Character then
+    onCharacterAdded(player.Character)
+end
+
+-- Команды для чата (тест в игре)
+Players.PlayerAdded:Connect(function(plr)
+    plr.Chatted:Connect(function(msg)
+        if msg:lower() == "/farm on" then collecting = true print("Автосбор включен!") end
+        if msg:lower() == "/farm off" then collecting = false print("Автосбор выключен!") end
+    end)
+end)
+
+print("Автосбор фруктов запущен! /farm on/off для управления, братан! Погнали фармить!") [web:9]
