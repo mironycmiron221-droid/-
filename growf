@@ -1,104 +1,139 @@
--- Автосбор фруктов для Grow a Garden
+-- ✅ ПРОСТОЙ АВТОСБОР ДЛЯ GROW A GARDEN ПОД DELTA
+-- ВСТАВЬ ЭТО ЦЕЛИКОМ В DELTA EXECUTOR И НАЖМИ EXECUTE
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local player = Players.LocalPlayer
 
-local collecting = true   -- включение/выключение автосбора
-local autoSell = true     -- автопродажа при фарме
-local speed = 50          -- скорость ходьбы
+local character = player.Character or player.CharacterAdded:Wait()
+local rootPart = character:WaitForChild("HumanoidRootPart")
 
--- Функция для сбора фрукта
-local function collectFruit(fruit)
-    if not fruit or not fruit.Parent then return end
+-- НАСТРОЙКИ
+local FARM_ENABLED = true      -- автосбор вкл/выкл
+local WALK_SPEED = 50          -- скорость ходьбы
+local TELEPORT_DELAY = 0.1     -- задержка между тп
+local SCAN_DELAY = 0.3         -- задержка, если нет фруктов
 
-    local char = player.Character
-    if not char then return end
+-- Под себя потом можешь поменять слова, если узнаем точные имена
+local FRUIT_KEYWORDS = {
+    "fruit",
+    "apple",
+    "banana",
+    "berry",
+    "melon",
+    "straw",
+    "grape"
+}
 
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
+---------------------------------------------------------------------
+-- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+---------------------------------------------------------------------
 
-    -- Телепорт к фрукту с небольшим оффсетом по Y
-    hrp.CFrame = fruit.CFrame * CFrame.new(0, 5, 0)
-    task.wait(0.1)
-
-    -- Пытаемся нажать ClickDetector, если он есть
-    local cd = fruit:FindFirstChildOfClass("ClickDetector")
-    if cd and fireclickdetector then
-        pcall(function()
-            fireclickdetector(cd)
-        end)
+local function isFruit(obj)
+    if not obj:IsA("BasePart") then return false end
+    local name = obj.Name:lower()
+    for _, word in ipairs(FRUIT_KEYWORDS) do
+        if name:find(word) then
+            return true
+        end
     end
+    return false
 end
 
--- Поиск всех фруктов в workspace
-local function findFruits()
+local function getAllFruits()
     local fruits = {}
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") then
-            local name = obj.Name:lower()
-            if name:find("fruit") or name:find("apple") or name:find("berry") or name:find("harvest") then
-                table.insert(fruits, obj)
-            end
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if isFruit(obj) then
+            table.insert(fruits, obj)
         end
     end
     return fruits
 end
 
--- Основной цикл автосбора
-local connection
-connection = RunService.Heartbeat:Connect(function()
-    if not collecting then return end
+local function getClosestFruit()
+    if not rootPart then return nil end
 
-    local fruits = findFruits()
-    if #fruits > 0 then
-        for _, fruit in ipairs(fruits) do
-            collectFruit(fruit)
+    local fruits = getAllFruits()
+    local closest, closestDist
+
+    for _, fruit in ipairs(fruits) do
+        local dist = (fruit.Position - rootPart.Position).Magnitude
+        if not closestDist or dist < closestDist then
+            closestDist = dist
+            closest = fruit
         end
     end
 
-    -- Автопродажа
-    if autoSell then
-        local char = player.Character
-        if char then
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if hrp then
-                local sellPart = workspace:FindFirstChild("SellShop") or workspace:FindFirstChild("Shop")
-                if sellPart and sellPart:IsA("BasePart") then
-                    hrp.CFrame = sellPart.CFrame + Vector3.new(0, 3, 0)
-                    local cd = sellPart:FindFirstChildOfClass("ClickDetector")
-                    if cd and fireclickdetector then
-                        pcall(function()
-                            fireclickdetector(cd)
-                        end)
-                    end
-                end
+    return closest
+end
+
+local function teleportTo(part)
+    if not part or not part.Parent then return end
+    if not rootPart then return end
+
+    rootPart.CFrame = CFrame.new(part.Position + Vector3.new(0, 3, 0))
+end
+
+---------------------------------------------------------------------
+-- ОСНОВНОЙ ЦИКЛ
+---------------------------------------------------------------------
+
+task.spawn(function()
+    print("[GA Garden] Автофарм запущен, братан!")
+
+    while true do
+        if FARM_ENABLED and rootPart then
+            local fruit = getClosestFruit()
+            if fruit then
+                teleportTo(fruit)
+                -- Многие игры собирают по Touch, просто стоять на предмете уже достаточно
+                -- Если тут нужен именно клик/промпт — подправим потом, когда узнаем структуру
+                task.wait(TELEPORT_DELAY)
+            else
+                task.wait(SCAN_DELAY)
             end
+        else
+            task.wait(0.5)
         end
     end
 end)
 
--- Обработка респавна персонажа
+---------------------------------------------------------------------
+-- РЕСПАВН
+---------------------------------------------------------------------
+
 local function onCharacterAdded(char)
-    task.wait(1)
-    local humanoid = char:WaitForChild("Humanoid")
-    humanoid.WalkSpeed = speed
+    character = char
+    local hrp = char:WaitForChild("HumanoidRootPart", 10)
+    local hum = char:FindFirstChildOfClass("Humanoid") or char:WaitForChild("Humanoid", 10)
+
+    if hrp then
+        rootPart = hrp
+    end
+
+    if hum then
+        hum.WalkSpeed = WALK_SPEED
+    end
+
+    print("[GA Garden] Персонаж перезагружен, автофарм продолжается.")
 end
 
 player.CharacterAdded:Connect(onCharacterAdded)
-if player.Character then
-    onCharacterAdded(player.Character)
-end
 
--- Команды для чата
+---------------------------------------------------------------------
+-- КОМАНДЫ ЧЕРЕЗ ЧАТ
+---------------------------------------------------------------------
+
 player.Chatted:Connect(function(msg)
     msg = msg:lower()
     if msg == "/farm on" then
-        collecting = true
-        print("Автосбор включен!")
+        FARM_ENABLED = true
+        print("[GA Garden] Автосбор ВКЛЮЧЕН.")
     elseif msg == "/farm off" then
-        collecting = false
-        print("Автосбор выключен!")
+        FARM_ENABLED = false
+        print("[GA Garden] Автосбор ВЫКЛЮЧЕН.")
     end
 end)
 
-print("Автосбор фруктов запущен! /farm on и /farm off для управления, братан!")
+print("[GA Garden] Команды: /farm on и /farm off")
+                           
